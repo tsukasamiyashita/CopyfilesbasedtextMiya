@@ -1,106 +1,246 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext
+from tkinter import filedialog, messagebox, scrolledtext, font
 import os
 import shutil
 import threading
 from pathlib import Path
 import concurrent.futures
 
-# --- 検索・コピー処理関数 ---
-def process_single_file(filepath, keywords, dst_folder):
+# --- デザイン設定 (Color Palette & Style) ---
+class Theme:
+    BG_MAIN = "#F0F4F8"       # 全体の背景（薄い青グレー）
+    BG_Input = "#FFFFFF"      # 入力エリア背景
+    FG_TEXT = "#2C3E50"       # メインテキスト色（濃紺グレー）
+    FG_SUB = "#7F8C8D"        # 補足テキスト色
+    
+    BTN_PRIMARY = "#3498DB"   # 実行ボタン（明るい青）
+    BTN_PRIMARY_HOVER = "#2980B9" # 実行ボタンホバー（濃い青）
+    BTN_DANGER = "#E74C3C"    # 中止ボタン（赤）
+    BTN_DANGER_HOVER = "#C0392B" # 中止ボタンホバー
+    BTN_SUB = "#BDC3C7"       # 参照ボタン（グレー）
+    BTN_SUB_HOVER = "#95A5A6" # 参照ボタンホバー
+    
+    FONT_MAIN = ("Yu Gothic UI", 10)
+    FONT_BOLD = ("Yu Gothic UI", 10, "bold")
+    FONT_L = ("Yu Gothic UI", 11)
+
+# --- 安全な検索・コピー処理関数 ---
+def process_single_file_safely(filepath, keywords, dst_folder):
     """
-    1ファイルを処理する関数。
-    ファイル名にキーワードが含まれているかを確認し、含まれていればコピーする。
+    1ファイルを処理する関数 (厳重な保護付き)。
     """
     try:
-        # ファイル名を取得 (拡張子含む)
-        filename = filepath.name
+        src_path = filepath.resolve()
+        filename = src_path.name
         
-        # キーワードがファイル名に含まれているかチェック
+        # --- 1. キーワード判定 ---
         matched_kw = None
         for kw in keywords:
             if kw in filename:
                 matched_kw = kw
                 break
         
-        # ヒットしなければ終了
         if matched_kw is None:
             return None
 
-        # --- コピー実行 ---
-        target_file = dst_folder / filename
+        # --- 2. 安全性チェック ---
+        target_file = (dst_folder / filename).resolve()
         
-        # 同名ファイル回避 (例: text.txt -> text_1.txt)
-        if target_file.exists():
-            base = target_file.stem
-            ext = target_file.suffix
-            idx = 1
-            while target_file.exists():
-                target_file = dst_folder / f"{base}_{idx}{ext}"
-                idx += 1
-        
-        shutil.copy2(filepath, target_file)
-        return ("COPIED", f"{filename} (ヒット: {matched_kw})")
+        if src_path == target_file:
+            return ("SKIPPED", f"{filename} (同一ファイル)")
+            
+        try:
+            if os.path.samefile(src_path, target_file):
+                 return ("SKIPPED", f"{filename} (同一ファイル)")
+        except OSError:
+            pass
 
+        # --- 3. 更新判定 ---
+        action_type = "COPIED"
+
+        if target_file.exists():
+            src_mtime = src_path.stat().st_mtime
+            dst_mtime = target_file.stat().st_mtime
+
+            if src_mtime > dst_mtime:
+                action_type = "UPDATED"
+            else:
+                return ("SKIPPED", f"{filename} (既存の方が新しいか同じ)")
+        
+        # --- 4. コピー実行 ---
+        shutil.copy2(src_path, target_file)
+        
+        return (action_type, f"{filename} (ヒット: {matched_kw})")
+
+    except PermissionError:
+        return ("ERROR", f"{filepath.name}: 権限なし")
     except Exception as e:
         return ("ERROR", f"{filepath.name}: {str(e)}")
+
+# --- UIパーツ: ホバー機能付きボタン ---
+class HoverButton(tk.Button):
+    def __init__(self, master, bg_color, hover_color, text_color="#FFFFFF", **kwargs):
+        super().__init__(master, bg=bg_color, fg=text_color, activebackground=hover_color, activeforeground=text_color, relief="flat", borderwidth=0, cursor="hand2", **kwargs)
+        self.bg_color = bg_color
+        self.hover_color = hover_color
+        self.bind("<Enter>", self.on_enter)
+        self.bind("<Leave>", self.on_leave)
+
+    def on_enter(self, e):
+        self['background'] = self.hover_color
+
+    def on_leave(self, e):
+        self['background'] = self.bg_color
+    
+    def set_color(self, bg, hover):
+        self.bg_color = bg
+        self.hover_color = hover
+        self['background'] = bg
+        self['activebackground'] = hover
 
 # --- アプリケーション本体 ---
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("ファイル名検索・コピーツール")
-        self.geometry("600x650")
+        self.title("BlueFile Search & Copy")
+        self.geometry("600x700")
+        self.configure(bg=Theme.BG_MAIN)
+        
+        # スレッド制御
+        self.stop_event = threading.Event()
+        self.is_running = False
 
         # --- UI構築 ---
+        container = tk.Frame(self, bg=Theme.BG_MAIN)
+        container.pack(fill="both", expand=True, padx=20, pady=20)
+
         # 1. 検索キーワード
-        tk.Label(self, text="検索したいファイル名の一部 (1行に1つ)", anchor="w").pack(fill="x", padx=10, pady=(10, 0))
-        self.txt_keywords = scrolledtext.ScrolledText(self, height=6)
-        self.txt_keywords.pack(fill="x", padx=10, pady=5)
+        lbl_kw = tk.Label(container, text="検索キーワード (ファイル名の一部)", bg=Theme.BG_MAIN, fg=Theme.FG_TEXT, font=Theme.FONT_BOLD, anchor="w")
+        lbl_kw.pack(fill="x", pady=(0, 5))
+        
+        tk.Label(container, text="※1行に1つ入力 / 右クリック貼り付け可", bg=Theme.BG_MAIN, fg=Theme.FG_SUB, font=("Yu Gothic UI", 8), anchor="w").pack(fill="x", pady=(0, 2))
+
+        self.txt_keywords = scrolledtext.ScrolledText(container, height=6, bg=Theme.BG_Input, fg=Theme.FG_TEXT, font=Theme.FONT_MAIN, relief="flat", bd=1)
+        self.txt_keywords.pack(fill="x", pady=(0, 15))
+        self.add_border(self.txt_keywords) # 枠線を擬似的に追加
+        self.add_context_menu(self.txt_keywords)
 
         # 2. フォルダ選択エリア
-        self.create_folder_select_ui("検索元フォルダ:", "src_path")
-        self.create_folder_select_ui("コピー先フォルダ:", "dst_path")
+        self.create_folder_select_ui(container, "検索元フォルダ (読取専用)", "src_path")
+        self.create_folder_select_ui(container, "コピー先フォルダ (保存先)", "dst_path")
 
-        # 3. 実行ボタン
-        self.btn_run = tk.Button(self, text="検索とコピーを実行", command=self.start_process, bg="#dddddd", height=2)
-        self.btn_run.pack(fill="x", padx=10, pady=10)
+        # 3. 実行/中止ボタン
+        self.btn_run = HoverButton(container, text="検索とコピーを開始", 
+                                   bg_color=Theme.BTN_PRIMARY, hover_color=Theme.BTN_PRIMARY_HOVER,
+                                   font=Theme.FONT_BOLD, height=2)
+        self.btn_run.configure(command=self.toggle_process)
+        self.btn_run.pack(fill="x", pady=(10, 20))
 
         # 4. ログ表示
-        tk.Label(self, text="実行ログ", anchor="w").pack(fill="x", padx=10)
-        self.txt_log = scrolledtext.ScrolledText(self, state='disabled')
-        self.txt_log.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        tk.Label(container, text="実行ログ", bg=Theme.BG_MAIN, fg=Theme.FG_TEXT, font=Theme.FONT_BOLD, anchor="w").pack(fill="x", pady=(0, 5))
+        
+        self.txt_log = scrolledtext.ScrolledText(container, state='disabled', bg=Theme.BG_Input, fg=Theme.FG_TEXT, font=("Consolas", 9), relief="flat")
+        self.txt_log.pack(fill="both", expand=True)
+        self.add_border(self.txt_log)
+        self.add_context_menu(self.txt_log)
 
-    def create_folder_select_ui(self, label_text, attr_name):
-        frame = tk.Frame(self)
-        frame.pack(fill="x", padx=10, pady=5)
-        tk.Label(frame, text=label_text, width=15, anchor="w").pack(side="left")
-        entry = tk.Entry(frame)
-        entry.pack(side="left", fill="x", expand=True)
+    def add_border(self, widget):
+        """ウィジェットの周りに1pxの枠線フレームをつける"""
+        # TkinterのTextウィジェットはborderの色の変更が難しいため、親フレームのpaddingで擬似的に表現することも多いが
+        # 今回はシンプルに見せるため、ウィジェット自体のhighlightthicknessを利用
+        widget.config(highlightbackground="#D0D9E0", highlightcolor=Theme.BTN_PRIMARY, highlightthickness=1)
+
+    def create_folder_select_ui(self, parent, label_text, attr_name):
+        frame = tk.Frame(parent, bg=Theme.BG_MAIN)
+        frame.pack(fill="x", pady=(0, 10))
+        
+        lbl = tk.Label(frame, text=label_text, width=22, anchor="w", bg=Theme.BG_MAIN, fg=Theme.FG_TEXT, font=Theme.FONT_MAIN)
+        lbl.pack(side="left")
+        
+        entry = tk.Entry(frame, bg=Theme.BG_Input, fg=Theme.FG_TEXT, font=Theme.FONT_MAIN, relief="flat", highlightbackground="#D0D9E0", highlightcolor=Theme.BTN_PRIMARY, highlightthickness=1)
+        entry.pack(side="left", fill="x", expand=True, ipady=4, padx=(0, 5))
+        self.add_context_menu(entry)
         setattr(self, f"entry_{attr_name}", entry)
-        tk.Button(frame, text="参照", command=lambda: self.select_folder(entry)).pack(side="left", padx=(5, 0))
+        
+        btn = HoverButton(frame, text="参照", bg_color=Theme.BTN_SUB, hover_color=Theme.BTN_SUB_HOVER, width=8, font=Theme.FONT_MAIN)
+        btn.configure(command=lambda: self.select_folder(entry))
+        btn.pack(side="left")
+
+    def add_context_menu(self, widget):
+        menu = tk.Menu(widget, tearoff=0, bg="white", fg=Theme.FG_TEXT)
+        menu.add_command(label="切り取り", command=lambda: widget.event_generate("<<Cut>>"))
+        menu.add_command(label="コピー", command=lambda: widget.event_generate("<<Copy>>"))
+        menu.add_command(label="貼り付け", command=lambda: widget.event_generate("<<Paste>>"))
+        menu.add_separator()
+        menu.add_command(label="全選択", command=lambda: widget.event_generate("<<SelectAll>>"))
+
+        def show_menu(event):
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+
+        if self.tk.call('tk', 'windowingsystem') == 'aqua':
+            widget.bind("<Button-2>", show_menu)
+            widget.bind("<Control-1>", show_menu)
+        else:
+            widget.bind("<Button-3>", show_menu)
 
     def select_folder(self, entry_widget):
-        path = filedialog.askdirectory()
+        current_path = entry_widget.get().strip()
+        init_dir = os.path.expanduser("~")
+        if current_path and os.path.isdir(current_path):
+            init_dir = current_path
+        
+        path = filedialog.askdirectory(initialdir=init_dir)
         if path:
             entry_widget.delete(0, tk.END)
             entry_widget.insert(0, path)
 
-    # --- UI操作用 (スレッドセーフ) ---
+    # --- UI操作 (スレッドセーフ) ---
     def append_log(self, message):
         self.txt_log.config(state='normal')
         self.txt_log.insert(tk.END, message + "\n")
         self.txt_log.see(tk.END)
         self.txt_log.config(state='disabled')
 
-    def ui_finish(self, count):
-        self.append_log(f"--- 完了: {count}ファイルをコピーしました ---")
-        self.btn_run.config(state='normal')
-        messagebox.showinfo("完了", f"処理が完了しました。\nコピー数: {count}")
+    def set_ui_state(self, running):
+        self.is_running = running
+        if running:
+            self.btn_run.configure(text="処理を中止する")
+            self.btn_run.set_color(Theme.BTN_DANGER, Theme.BTN_DANGER_HOVER)
+        else:
+            self.btn_run.configure(text="検索とコピーを開始")
+            self.btn_run.set_color(Theme.BTN_PRIMARY, Theme.BTN_PRIMARY_HOVER)
+
+    def ui_finish(self, counts, aborted=False):
+        self.set_ui_state(False)
+        if aborted:
+            self.append_log("!!! 中止されました !!!")
+            messagebox.showinfo("中止", "処理を中止しました。")
+        else:
+            self.append_log(f"--- 完了 ---")
+            self.append_log(f"新規: {counts.get('COPIED', 0)}")
+            self.append_log(f"更新: {counts.get('UPDATED', 0)}")
+            self.append_log(f"維持: {counts.get('SKIPPED', 0)}")
+            
+            msg = (f"処理完了\n"
+                   f"新規: {counts.get('COPIED', 0)}\n"
+                   f"更新: {counts.get('UPDATED', 0)}\n"
+                   f"維持: {counts.get('SKIPPED', 0)}")
+            messagebox.showinfo("完了", msg)
+
+    # --- ボタンアクション ---
+    def toggle_process(self):
+        if self.is_running:
+            if messagebox.askyesno("確認", "処理を中止しますか？"):
+                self.stop_event.set()
+                self.append_log("...中止要求中...")
+        else:
+            self.start_process()
 
     # --- メイン処理 ---
     def start_process(self):
-        # 入力キーワードの取得
         raw_text = self.txt_keywords.get("1.0", tk.END)
         keywords = [line.strip() for line in raw_text.splitlines() if line.strip()]
         
@@ -108,62 +248,78 @@ class App(tk.Tk):
         dst = self.entry_dst_path.get()
 
         if not keywords:
-            messagebox.showwarning("警告", "検索キーワードを入力してください")
+            messagebox.showwarning("入力エラー", "検索キーワードを入力してください")
             return
         if not src or not os.path.isdir(src):
-            messagebox.showwarning("警告", "有効な検索元フォルダを指定してください")
+            messagebox.showwarning("入力エラー", "検索元フォルダを指定してください")
             return
         if not dst or not os.path.isdir(dst):
-            messagebox.showwarning("警告", "有効なコピー先フォルダを指定してください")
+            messagebox.showwarning("入力エラー", "コピー先フォルダを指定してください")
             return
 
-        # UIロック
-        self.btn_run.config(state='disabled')
+        self.stop_event.clear()
+        self.set_ui_state(True)
+        
         self.txt_log.config(state='normal')
         self.txt_log.delete("1.0", tk.END)
         self.txt_log.config(state='disabled')
-        self.append_log(f"--- ファイル名検索開始: キーワード {len(keywords)}件 ---")
+        self.append_log(f"--- 検索開始 ---")
         
-        # スレッド開始
         threading.Thread(target=self.run_parallel_task, args=(keywords, src, dst), daemon=True).start()
 
     def run_parallel_task(self, keywords, src, dst):
         src_path_obj = Path(src).resolve()
         dst_path_obj = Path(dst).resolve()
         
-        # 1. ファイルリストアップ
+        if src_path_obj == dst_path_obj:
+            self.after(0, self.append_log, "エラー: 検索元とコピー先が同じです")
+            self.after(0, self.ui_finish, {}, True)
+            return
+
         all_files = []
         for root, dirs, files in os.walk(src):
+            if self.stop_event.is_set(): break
             current_dir = Path(root).resolve()
-            # コピー先フォルダが検索元に含まれる場合は除外
             if dst_path_obj == current_dir or dst_path_obj in current_dir.parents:
                 continue
             for f in files:
                 all_files.append(current_dir / f)
 
-        self.after(0, self.append_log, f"対象ファイル数: {len(all_files)}件 - 解析中...")
+        if self.stop_event.is_set():
+            self.after(0, self.ui_finish, {}, True)
+            return
 
-        copied_count = 0
+        self.after(0, self.append_log, f"対象ファイル: {len(all_files)}件 - 解析中...")
+
+        stats = {"COPIED": 0, "UPDATED": 0, "SKIPPED": 0}
+        aborted = False
         
-        # 2. 並列処理実行
         with concurrent.futures.ThreadPoolExecutor() as executor:
             future_to_file = {
-                executor.submit(process_single_file, f, keywords, dst_path_obj): f 
+                executor.submit(process_single_file_safely, f, keywords, dst_path_obj): f 
                 for f in all_files
             }
 
             for future in concurrent.futures.as_completed(future_to_file):
-                result = future.result()
-                if result:
-                    status, msg = result
-                    if status == "COPIED":
-                        copied_count += 1
-                        self.after(0, self.append_log, f"コピー: {msg}")
-                    elif status == "ERROR":
-                         # エラーログが必要な場合はここで出力
-                         pass
+                if self.stop_event.is_set():
+                    aborted = True
+                    for f in future_to_file: f.cancel()
+                    break
 
-        self.after(0, self.ui_finish, copied_count)
+                try:
+                    result = future.result()
+                    if result:
+                        status, msg = result
+                        if status in stats:
+                            stats[status] += 1
+                        
+                        if status != "SKIPPED":
+                            disp_status = "新規" if status == "COPIED" else "更新"
+                            self.after(0, self.append_log, f"[{disp_status}] {msg}")
+                except Exception:
+                    pass
+                    
+        self.after(0, self.ui_finish, stats, aborted)
 
 if __name__ == "__main__":
     app = App()
