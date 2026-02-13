@@ -11,7 +11,7 @@ class Theme:
     BG_MAIN = "#F0F4F8"       # 全体の背景（薄い青グレー）
     BG_Input = "#FFFFFF"      # 入力エリア背景
     FG_TEXT = "#2C3E50"       # メインテキスト色（濃紺グレー）
-    FG_SUB = "#7F8C8D"        # 補足テキスト色
+    FG_SUB = "#95A5A6"        # 補足・バージョン情報色（薄いグレー）
     
     BTN_PRIMARY = "#3498DB"   # 実行ボタン（明るい青）
     BTN_PRIMARY_HOVER = "#2980B9" # 実行ボタンホバー（濃い青）
@@ -22,7 +22,7 @@ class Theme:
     
     FONT_MAIN = ("Yu Gothic UI", 10)
     FONT_BOLD = ("Yu Gothic UI", 10, "bold")
-    FONT_L = ("Yu Gothic UI", 11)
+    FONT_SMALL = ("Yu Gothic UI", 9)
 
 # --- 安全な検索・コピー処理関数 ---
 def process_single_file_safely(filepath, keywords, dst_folder):
@@ -100,10 +100,12 @@ class HoverButton(tk.Button):
 
 # --- アプリケーション本体 ---
 class App(tk.Tk):
+    APP_VERSION = "v1.0.0"
+
     def __init__(self):
         super().__init__()
-        self.title("BlueFile Search & Copy")
-        self.geometry("600x700")
+        self.title(f"CopyFiesBasedText {self.APP_VERSION}")
+        self.geometry("600x750") # 高さを少し拡張
         self.configure(bg=Theme.BG_MAIN)
         
         # スレッド制御
@@ -114,45 +116,57 @@ class App(tk.Tk):
         container = tk.Frame(self, bg=Theme.BG_MAIN)
         container.pack(fill="both", expand=True, padx=20, pady=20)
 
-        # 1. 検索キーワード
+        # ---------------------------------------------------------
+        # レイアウト配置順序の最適化
+        # Tkinterのpackは「早い者勝ち」で場所を確保するため、
+        # 上部固定 → 下部固定(バージョン) → 中央可変(ログ) の順で配置します。
+        # ---------------------------------------------------------
+
+        # 1. [Top] 検索キーワードエリア
         lbl_kw = tk.Label(container, text="検索キーワード (ファイル名の一部)", bg=Theme.BG_MAIN, fg=Theme.FG_TEXT, font=Theme.FONT_BOLD, anchor="w")
-        lbl_kw.pack(fill="x", pady=(0, 5))
+        lbl_kw.pack(side="top", fill="x", pady=(0, 5))
         
-        tk.Label(container, text="※1行に1つ入力 / 右クリック貼り付け可", bg=Theme.BG_MAIN, fg=Theme.FG_SUB, font=("Yu Gothic UI", 8), anchor="w").pack(fill="x", pady=(0, 2))
+        tk.Label(container, text="※1行に1つ入力 / 右クリック貼り付け可", bg=Theme.BG_MAIN, fg=Theme.FG_SUB, font=("Yu Gothic UI", 8), anchor="w").pack(side="top", fill="x", pady=(0, 2))
 
         self.txt_keywords = scrolledtext.ScrolledText(container, height=6, bg=Theme.BG_Input, fg=Theme.FG_TEXT, font=Theme.FONT_MAIN, relief="flat", bd=1)
-        self.txt_keywords.pack(fill="x", pady=(0, 15))
-        self.add_border(self.txt_keywords) # 枠線を擬似的に追加
+        self.txt_keywords.pack(side="top", fill="x", pady=(0, 15))
+        self.add_border(self.txt_keywords)
         self.add_context_menu(self.txt_keywords)
 
-        # 2. フォルダ選択エリア
+        # 2. [Top] フォルダ選択エリア
         self.create_folder_select_ui(container, "検索元フォルダ (読取専用)", "src_path")
         self.create_folder_select_ui(container, "コピー先フォルダ (保存先)", "dst_path")
 
-        # 3. 実行/中止ボタン
+        # 3. [Top] 実行/中止ボタン
         self.btn_run = HoverButton(container, text="検索とコピーを開始", 
                                    bg_color=Theme.BTN_PRIMARY, hover_color=Theme.BTN_PRIMARY_HOVER,
                                    font=Theme.FONT_BOLD, height=2)
         self.btn_run.configure(command=self.toggle_process)
-        self.btn_run.pack(fill="x", pady=(10, 20))
+        self.btn_run.pack(side="top", fill="x", pady=(10, 20))
 
-        # 4. ログ表示
-        tk.Label(container, text="実行ログ", bg=Theme.BG_MAIN, fg=Theme.FG_TEXT, font=Theme.FONT_BOLD, anchor="w").pack(fill="x", pady=(0, 5))
+        # 4. [Bottom] バージョン情報 (ここを先に配置して場所を確保)
+        # side="bottom" にすることで、ログ画面がどれだけ伸びても最下部に固定されます
+        lbl_version = tk.Label(container, text=self.APP_VERSION, bg=Theme.BG_MAIN, fg=Theme.FG_SUB, font=Theme.FONT_SMALL, anchor="e")
+        lbl_version.pack(side="bottom", fill="x", pady=(5, 0))
+
+        # 5. [Center] ログ表示 (残りのスペースを全て埋める)
+        # タイトル
+        tk.Label(container, text="実行ログ", bg=Theme.BG_MAIN, fg=Theme.FG_TEXT, font=Theme.FONT_BOLD, anchor="w").pack(side="top", fill="x", pady=(0, 5))
         
+        # ログ本体
         self.txt_log = scrolledtext.ScrolledText(container, state='disabled', bg=Theme.BG_Input, fg=Theme.FG_TEXT, font=("Consolas", 9), relief="flat")
-        self.txt_log.pack(fill="both", expand=True)
+        self.txt_log.pack(side="top", fill="both", expand=True) # expand=Trueで残り領域を占有
         self.add_border(self.txt_log)
         self.add_context_menu(self.txt_log)
 
+
     def add_border(self, widget):
         """ウィジェットの周りに1pxの枠線フレームをつける"""
-        # TkinterのTextウィジェットはborderの色の変更が難しいため、親フレームのpaddingで擬似的に表現することも多いが
-        # 今回はシンプルに見せるため、ウィジェット自体のhighlightthicknessを利用
         widget.config(highlightbackground="#D0D9E0", highlightcolor=Theme.BTN_PRIMARY, highlightthickness=1)
 
     def create_folder_select_ui(self, parent, label_text, attr_name):
         frame = tk.Frame(parent, bg=Theme.BG_MAIN)
-        frame.pack(fill="x", pady=(0, 10))
+        frame.pack(side="top", fill="x", pady=(0, 10))
         
         lbl = tk.Label(frame, text=label_text, width=22, anchor="w", bg=Theme.BG_MAIN, fg=Theme.FG_TEXT, font=Theme.FONT_MAIN)
         lbl.pack(side="left")
