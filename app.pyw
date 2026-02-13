@@ -104,7 +104,8 @@ class App(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title(f"CopyFiesBasedText {self.APP_VERSION}")
+        # タイトル変更
+        self.title(f"CopyfilesbasedtextMiya {self.APP_VERSION}")
         self.geometry("600x750") # 高さを少し拡張
         self.configure(bg=Theme.BG_MAIN)
         
