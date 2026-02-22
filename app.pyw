@@ -100,7 +100,7 @@ class HoverButton(tk.Button):
 
 # --- アプリケーション本体 ---
 class App(tk.Tk):
-    APP_VERSION = "v1.0.0"
+    APP_VERSION = "v1.0.1"
     
     CHANGELOG = f"""【バージョン情報】
 CopyfilesbasedtextMiya {APP_VERSION}
