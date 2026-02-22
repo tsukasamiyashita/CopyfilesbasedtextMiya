@@ -101,6 +101,26 @@ class HoverButton(tk.Button):
 # --- アプリケーション本体 ---
 class App(tk.Tk):
     APP_VERSION = "v1.0.0"
+    
+    CHANGELOG = f"""【バージョン情報】
+CopyfilesbasedtextMiya {APP_VERSION}
+
+指定したキーワードがファイル名に含まれるファイルを安全にコピー・バックアップするツールです。
+"""
+
+    README = """【使い方 / README】
+
+1. 検索キーワードを入力します（1行に1つ）。
+   ※右クリックメニューからの貼り付けにも対応しています。
+2. 「検索元フォルダ」と「コピー先フォルダ」をそれぞれ参照ボタンから指定します。
+3. 「検索とコピーを開始」ボタンをクリックすると処理が始まります。
+
+【主な機能と仕様】
+・ファイル名検索: 入力したキーワード（部分一致）でファイルを高速検索します。
+・安全コピー保護: 読み取り専用アクセスで元ファイルを保護し、誤った上書きを防ぎます。
+・差分更新機能: コピー先に既に同名ファイルが存在する場合、コピー元の方が「新しい場合のみ」上書き更新します。
+・中断機能: 処理中であっても「処理を中止する」ボタンから安全に中断できます。
+"""
 
     def __init__(self):
         super().__init__()
@@ -112,6 +132,9 @@ class App(tk.Tk):
         # スレッド制御
         self.stop_event = threading.Event()
         self.is_running = False
+
+        # --- メニューバー作成 ---
+        self._create_menu()
 
         # --- UI構築 ---
         container = tk.Frame(self, bg=Theme.BG_MAIN)
@@ -146,7 +169,6 @@ class App(tk.Tk):
         self.btn_run.pack(side="top", fill="x", pady=(10, 20))
 
         # 4. [Bottom] バージョン情報 (ここを先に配置して場所を確保)
-        # side="bottom" にすることで、ログ画面がどれだけ伸びても最下部に固定されます
         lbl_version = tk.Label(container, text=self.APP_VERSION, bg=Theme.BG_MAIN, fg=Theme.FG_SUB, font=Theme.FONT_SMALL, anchor="e")
         lbl_version.pack(side="bottom", fill="x", pady=(5, 0))
 
@@ -160,6 +182,22 @@ class App(tk.Tk):
         self.add_border(self.txt_log)
         self.add_context_menu(self.txt_log)
 
+    def _create_menu(self):
+        menubar = tk.Menu(self)
+        
+        # ヘルプメニュー
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="使い方 / README", command=self.show_readme_info)
+        help_menu.add_command(label="バージョン情報", command=self.show_version_info)
+        
+        menubar.add_cascade(label="ヘルプ", menu=help_menu)
+        self.config(menu=menubar)
+
+    def show_version_info(self):
+        messagebox.showinfo("バージョン情報", self.CHANGELOG)
+
+    def show_readme_info(self):
+        messagebox.showinfo("使い方 / README", self.README)
 
     def add_border(self, widget):
         """ウィジェットの周りに1pxの枠線フレームをつける"""
