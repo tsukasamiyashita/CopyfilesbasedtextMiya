@@ -1,10 +1,25 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, font
 import os
+import sys
 import shutil
 import threading
 from pathlib import Path
 import concurrent.futures
+
+# ==============================
+# リソースパス取得関数 (exe化対応)
+# ==============================
+def resource_path(relative_path):
+    """実行時（exe）でも通常時（.pyw）でも正しいファイルパスを取得する"""
+    try:
+        # PyInstallerで展開された時の一時フォルダパス
+        base_path = sys._MEIPASS
+    except Exception:
+        # 通常のPythonスクリプトとして実行した時のパス
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
 
 # --- デザイン設定 (Color Palette & Style) ---
 class Theme:
