@@ -1,2 +1,4 @@
-# 本アプリはPython標準ライブラリのみを使用しています。
-# 追加のpip installは不要です。
+# CopyfilesbasedtextMiya Requirements
+
+# 本アプリケーションは、Python標準ライブラリ（tkinter, os, shutil, threading, re, pathlib, concurrent.futures 等）のみを使用して構築されています。
+# そのため、追加でインストールが必要な外部パッケージ（pip install 等）はありません。
